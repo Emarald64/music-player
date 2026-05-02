@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced = { version = "0.14.0", features = ["svg"] }
+iced = { version = "0.14.0", features = ["advanced", "svg"] }
 rodio = "0.22.2"
+rust-embed = "8.11.0"
 serde = "1.0.228"
 symphonia = "0.5.5"

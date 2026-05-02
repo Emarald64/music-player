@@ -1,7 +1,8 @@
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
+use rust_embed::Embed;
 // use anyhow;
 use std::{fs::{self, File}, path::{Path, PathBuf}, time::Duration};
-use iced::{self,Element, widget::{column,scrollable,row,button,svg,text},};
+use iced::{self, Element, Length, widget::{button, column, row, scrollable, svg::{Handle}, svg, text}};
 
 fn main()->Result<(), iced::Error>{
     iced::application(boot,update, view).run()
@@ -10,7 +11,16 @@ fn main()->Result<(), iced::Error>{
 fn boot()->State{
     let handle=DeviceSinkBuilder::open_default_sink().expect("Failed to connect to audio");
     let player=rodio::Player::connect_new(&handle.mixer());
-    State {handle:handle, player: player, songs:scan_songs("/home/agiller/Music")}
+    State {_handle:handle, player: player, songs:scan_songs("/home/agiller/Music")}
+}
+
+#[derive(Embed)]
+#[folder = "icons/"]
+struct Icon;
+impl Icon{
+    fn get_handle(name:&str)->Option<Handle>{
+        Self::get(name).map(|file|{Handle::from_memory(file.data)})
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -19,28 +29,37 @@ enum Message{
     Start(PathBuf)
 }
 
-// #[derive(Default)]
 struct State{
-    handle:MixerDeviceSink,
+    _handle:MixerDeviceSink,
     player:Player,
-    songs:Vec<PathBuf>
+    songs:Vec<MenuEntry>
 }
 
+struct MenuEntry{
+    path:PathBuf,
+    folder:bool
+}
 
 fn view(state:&State) -> Element<'_, Message>{
     println!("updating layout");
     column![
         scrollable(column(
-            state.songs.iter().filter_map(|file|{
-                file.file_stem().expect("empty file name").to_str().map(|name|{
-                    button(text(name))
-                    .on_press(Message::Start(file.clone()))
+            state.songs.iter().filter_map(|entry|{
+                entry.path.file_stem().expect("empty file name").to_str().map(|name|{
+                    button(
+                        row![
+                            svg(Icon::get_handle(if entry.folder {"folder.svg"} else {"song.svg"}).expect("couldn't find icon")).width(16),
+                            text(name)
+                        ]
+                    )
+                    .on_press(Message::Start(entry.path.clone()))
                     .into()
                 })
             })
-        )),
-        button(svg("play.svg"))
-            .on_press(Message::TogglePlay),
+        ).spacing(4).width(Length::Fill)).height(Length::Fill),
+        button(svg(Icon::get_handle("play.svg").expect("couldn't file play icon")))
+            .on_press(Message::TogglePlay)
+            .height(64),
     ].into()
 }
 
@@ -67,7 +86,7 @@ fn update(state:&mut State,msg:Message){
     }
 }
 
-fn scan_songs<P:AsRef<Path>>(folder:P)->Vec<PathBuf>{
+fn scan_songs<P:AsRef<Path>>(folder:P)->Vec<MenuEntry>{
     const VALID_EXTENTIONS:[&str;2]=["mp3","m4a"];
     println!("scanning songs");
     match fs::read_dir(folder){
@@ -77,13 +96,15 @@ fn scan_songs<P:AsRef<Path>>(folder:P)->Vec<PathBuf>{
                 if let Ok(entry)=entry{
                     let path=entry.path();
                     if let Ok(file_type)=entry.file_type(){
+
                         if file_type.is_file(){
                             if let Some(Some(extention))=path.extension().map(|extention|{extention.to_str()})
                             && VALID_EXTENTIONS.contains(&extention){
-                                out.push(path);
+                                out.push(MenuEntry{path:path,folder:false});
+
                             }
                         }else if file_type.is_dir(){
-                            out.extend(scan_songs(path));
+                            out.push(MenuEntry{path:path,folder:true});
                         }
                     }
                 }
