@@ -1,6 +1,6 @@
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 // use anyhow;
-use std::{fs::{self, File}, io::BufReader, path::PathBuf, time::Duration};
+use std::{fs::{self, File}, path::{Path, PathBuf}, time::Duration};
 use iced::{self,Element, widget::{column,scrollable,row,button,svg,text},};
 
 fn main()->Result<(), iced::Error>{
@@ -10,30 +10,33 @@ fn main()->Result<(), iced::Error>{
 fn boot()->State{
     let handle=DeviceSinkBuilder::open_default_sink().expect("Failed to connect to audio");
     let player=rodio::Player::connect_new(&handle.mixer());
-    State {handle:handle, player: player, songs:Vec::new()}
+    State {handle:handle, player: player, songs:scan_songs("/home/agiller/Music")}
 }
 
 #[derive(Debug, Clone)]
 enum Message{
     TogglePlay,
-    Start(String)
+    Start(PathBuf)
 }
 
 // #[derive(Default)]
 struct State{
     handle:MixerDeviceSink,
     player:Player,
-    songs:Vec<String>
+    songs:Vec<PathBuf>
 }
 
 
 fn view(state:&State) -> Element<'_, Message>{
+    println!("updating layout");
     column![
-        scrollable(row(
-            state.songs.iter().map(|file|{
-                button(text(file))
-                .on_press(Message::Start(file.clone()))
-                .into()
+        scrollable(column(
+            state.songs.iter().filter_map(|file|{
+                file.file_stem().expect("empty file name").to_str().map(|name|{
+                    button(text(name))
+                    .on_press(Message::Start(file.clone()))
+                    .into()
+                })
             })
         )),
         button(svg("play.svg"))
@@ -64,8 +67,9 @@ fn update(state:&mut State,msg:Message){
     }
 }
 
-fn scan_songs(folder:PathBuf)->Vec<PathBuf>{
+fn scan_songs<P:AsRef<Path>>(folder:P)->Vec<PathBuf>{
     const VALID_EXTENTIONS:[&str;2]=["mp3","m4a"];
+    println!("scanning songs");
     match fs::read_dir(folder){
         Ok(entries)=>{
             let mut out=Vec::new();
