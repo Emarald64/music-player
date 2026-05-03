@@ -1,7 +1,7 @@
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 use rust_embed::Embed;
 // use anyhow;
-use std::{collections::HashMap, fs::{self, File}, path::{Path, PathBuf}, rc::Rc, sync::Mutex};
+use std::{collections::HashMap, fs::{self, DirEntry, File}, path::{Path, PathBuf}, rc::Rc, sync::Mutex};
 use iced::{self, Element, Length, widget::{svg, Space, button, column, row, scrollable, svg::Handle, text}};
 
 fn main()->Result<(), iced::Error>{
@@ -60,11 +60,12 @@ fn get_folder_entries<'a>(entries:&Vec<Rc<Mutex<MenuEntry>>>)->Element<'a, Messa
         entries.iter().map(|entry|{
             let entry=entry.lock().expect("error accesing");
             let name= String::from(entry.path.file_stem().expect("empty file name").to_str().expect("invalid filename"));
+            const ICON_SIZE:u32=20;
             match &entry.status{
                 ButtonStatus::File=>{
                     button(
                         row![
-                            svg(Icon::get_handle("song.svg").expect("couldn't find icon")).width(16),
+                            svg(Icon::get_handle("song.svg").expect("couldn't find icon")).width(ICON_SIZE),
                             text(name)
                         ]
                     )
@@ -73,7 +74,7 @@ fn get_folder_entries<'a>(entries:&Vec<Rc<Mutex<MenuEntry>>>)->Element<'a, Messa
                 ButtonStatus::Folder(false,_)=>{
                     button(
                         row![
-                            svg(Icon::get_handle("folder.svg").expect("couldn't find icon")).width(16),
+                            svg(Icon::get_handle("folder.svg").expect("couldn't find icon")).width(ICON_SIZE),
                             text(name)
                         ]
                     )
@@ -83,7 +84,7 @@ fn get_folder_entries<'a>(entries:&Vec<Rc<Mutex<MenuEntry>>>)->Element<'a, Messa
                     column![
                         button(
                             row![
-                                svg(Icon::get_handle("folder.svg").expect("couldn't find icon")).width(16),
+                                svg(Icon::get_handle("folder.svg").expect("couldn't find icon")).width(ICON_SIZE),
                                 text(name)
                             ]
                         )
@@ -96,7 +97,7 @@ fn get_folder_entries<'a>(entries:&Vec<Rc<Mutex<MenuEntry>>>)->Element<'a, Messa
                 }
             }
         })
-    ).spacing(4).width(Length::Fill).into()
+    ).spacing(4).into()
 }
 
 fn view(state:&State) -> Element<'_, Message>{
@@ -133,8 +134,8 @@ fn update(state:&mut State,msg:Message){
         Message::OpenFolder(path)=>{
             let mut scan_files=true;
             if let Ok(mut entry)=state.entries[&path].lock()
-            && let ButtonStatus::Folder(ref mut open,_) =entry.status{
-                    scan_files=!*open;
+            && let ButtonStatus::Folder(ref mut open,ref entries) =entry.status{
+                    scan_files=entries.is_empty();
                     *open=true;
             }
             if scan_files{
@@ -154,33 +155,36 @@ fn update(state:&mut State,msg:Message){
     }
 }
 
+fn is_file(entry:&DirEntry)->bool{
+    entry.file_type().map(|ft|{ft.is_file()}).unwrap_or(true)
+}
+
 fn scan_songs<P:AsRef<Path>>(folder:P, entries:&mut HashMap<PathBuf,Rc<Mutex<MenuEntry>>>)->Vec<Rc<Mutex<MenuEntry>>>{
-    const VALID_EXTENTIONS:[&str;2]=["mp3","m4a"];
+    const VALID_EXTENTIONS:[&str;3]=["mp3","m4a","ogg"];
     println!("scanning songs");
     match fs::read_dir(folder){
         Ok(dir_entries)=>{
-            let mut out=Vec::new();
-            for entry in dir_entries{
-                if let Ok(entry)=entry{
-                    let path=entry.path();
-                    if let Ok(file_type)=entry.file_type(){
-                        if file_type.is_file(){
-                            if let Some(Some(extention))=path.extension().map(|extention|{extention.to_str()})
-                            && VALID_EXTENTIONS.contains(&extention){
-                                let entry=Rc::new(Mutex::new(MenuEntry{path:path.clone(),status:ButtonStatus::File}));
-                                out.push(Rc::clone(&entry));
-                                entries.insert(path,entry);
-
-                            }
-                        }else if file_type.is_dir(){
-                            let entry=Rc::new(Mutex::new(MenuEntry{path:path.clone(),status:ButtonStatus::Folder(false,Vec::new())}));
-                            out.push(Rc::clone(&entry));
-                            entries.insert(path,entry);
-                        }
-                    }
+            let mut dir_entries:Vec<fs::DirEntry>=dir_entries.filter_map(|entry|{entry.ok()}).collect();
+            dir_entries.sort_by(|e1,e2|{
+                is_file(e1).cmp(&is_file(e2)).then_with(||{e1.file_name().cmp(&e2.file_name())})
+            });
+            dir_entries.iter().filter_map(|entry|{
+                let file_type=entry.file_type().ok()?;
+                let path=entry.path();
+                if file_type.is_file()
+                && let Some(Some(extention))=path.extension().map(|extention|{extention.to_str()})
+                && VALID_EXTENTIONS.contains(&extention){
+                    let entry=Rc::new(Mutex::new(MenuEntry{path:path.clone(),status:ButtonStatus::File}));
+                    entries.insert(path,Rc::clone(&entry));
+                    Some(entry)
+                }else if file_type.is_dir(){
+                    let entry=Rc::new(Mutex::new(MenuEntry{path:path.clone(),status:ButtonStatus::Folder(false,Vec::new())}));
+                    entries.insert(path,Rc::clone(&entry));
+                    Some(entry)
+                }else{
+                    None
                 }
-            }
-            out
+            }).collect()
         },
         Err(err)=>{
             println!("{err}");
