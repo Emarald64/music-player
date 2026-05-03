@@ -29,7 +29,8 @@ enum Message{
     TogglePlay,
     Start(PathBuf),
     OpenFolder(PathBuf),
-    CloseFolder(PathBuf)
+    CloseFolder(PathBuf),
+    Skip
 }
 
 struct State{
@@ -50,10 +51,6 @@ enum ButtonStatus{
     Folder(bool,Vec<Rc<Mutex<MenuEntry>>>),
     File
 }
-
-// fn generate_folder_button<'a>(entry:&MenuEntry,name:&'a str)->Element<'a, Message>{
-    
-// }
 
 fn get_folder_entries<'a>(entries:&Vec<Rc<Mutex<MenuEntry>>>)->Element<'a, Message>{
     column(
@@ -104,10 +101,24 @@ fn view(state:&State) -> Element<'_, Message>{
     // let mut song_entries=Vec::new();
     println!("updating layout");
     column![
-        scrollable(get_folder_entries(&state.top_folder)).height(Length::Fill),
-        button(svg(Icon::get_handle("play.svg").expect("couldn't file play icon")))
-            .on_press(Message::TogglePlay)
-            .height(64),
+        row![
+            scrollable(
+                get_folder_entries(&state.top_folder)
+            ).height(Length::Fill),
+
+        ],
+        row![
+            button(svg(Icon::get_handle(if state.player.is_paused() || state.player.empty() {"play.svg"} else {"pause.svg"}).expect("couldn't file play icon")))
+                .on_press(Message::TogglePlay)
+                .height(64),
+            button(svg(Icon::get_handle("skip.svg").expect("counldn't find skip icon")))
+                .on_press_maybe(
+                    match state.player.len(){
+                        2.. =>Some(Message::Skip),
+                        _=>None
+                    }
+                )
+        ],
     ].into()
 }
 
@@ -119,7 +130,10 @@ fn update(state:&mut State,msg:Message){
             }else{
                 state.player.pause();
             }
-        }
+        },
+        Message::Skip=>{
+            state.player.skip_one();
+        },
         Message::Start(song)=>{
             match File::open(song){
                 Ok(file)=>{
@@ -130,7 +144,7 @@ fn update(state:&mut State,msg:Message){
                     println!("{err}")
                 }
             }
-        }
+        },
         Message::OpenFolder(path)=>{
             let mut scan_files=true;
             if let Ok(mut entry)=state.entries[&path].lock()
@@ -145,13 +159,13 @@ fn update(state:&mut State,msg:Message){
                     *entries =new_entries;
             }
             }
-        }
+        },
         Message::CloseFolder(path)=>{
             if let Ok(mut entry)=state.entries[&path].lock()
             && let ButtonStatus::Folder(ref mut opened, _)=entry.status{
                 *opened=false;
             }
-        }
+        },
     }
 }
 
