@@ -1,18 +1,43 @@
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player};
 use rust_embed::Embed;
 // use anyhow;
-use std::{collections::HashMap, fs::{self, DirEntry, File}, path::{Path, PathBuf}, rc::Rc, sync::Mutex};
-use iced::{self, Element, Length, widget::{svg, Space, button, column, row, scrollable, svg::Handle, text}};
+use std::{collections::HashMap, env::home_dir, fs::{self, DirEntry, File}, io::{Read, Write}, path::{Path, PathBuf}, rc::Rc, sync::Mutex};
+use iced::{self, Element, Length, widget::{Column, Space, button, column, row, scrollable, svg::Handle, svg as build_svg, text, text_input}};
 
 fn main()->Result<(), iced::Error>{
     iced::application(boot,update, view).run()
+}
+
+const CONFIG_LOCATION:&str="folder.txt";
+
+fn default_folder()->String{
+    match home_dir(){
+        Some(mut home_dir)=>{
+            home_dir.push("Music");
+            String::from(home_dir.to_string_lossy())
+        },
+        None=>String::from("")
+    }
 }
 
 fn boot()->State{
     let handle=DeviceSinkBuilder::open_default_sink().expect("Failed to connect to audio");
     let player=rodio::Player::connect_new(&handle.mixer());
     let mut entries=HashMap::new();
-    State {_handle:handle, player: player, top_folder:scan_songs("/home/agiller/Music",&mut entries), entries:entries}
+    //read folder from file if it exists
+    let folder=
+    if let Ok(mut file)=File::open(CONFIG_LOCATION){
+        let mut buf=String::new();
+        if let Ok(_)=file.read_to_string(&mut buf){
+            buf
+        }else{
+            default_folder()
+        }
+    }else{
+        default_folder()
+    };
+    
+    State {_handle:handle, player: player, top_folder:scan_songs(&folder,&mut entries), entries:entries,folder:folder}
 }
 
 #[derive(Embed)]
@@ -30,14 +55,17 @@ enum Message{
     Start(PathBuf),
     OpenFolder(PathBuf),
     CloseFolder(PathBuf),
-    Skip
+    Skip,
+    UpdateFolder(String),
+    SubmitFolder,
 }
 
 struct State{
     _handle:MixerDeviceSink,
     player:Player,
     top_folder:Vec<Rc<Mutex<MenuEntry>>>,
-    entries:HashMap<PathBuf,Rc<Mutex<MenuEntry>>>
+    entries:HashMap<PathBuf,Rc<Mutex<MenuEntry>>>,
+    folder:String,
 }
 
 struct MenuEntry{
@@ -52,7 +80,7 @@ enum ButtonStatus{
     File
 }
 
-fn get_folder_entries<'a>(entries:&Vec<Rc<Mutex<MenuEntry>>>)->Element<'a, Message>{
+fn get_folder_entries<'a>(entries:&Vec<Rc<Mutex<MenuEntry>>>)->Column<'a, Message>{
     column(
         entries.iter().map(|entry|{
             let entry=entry.lock().expect("error accesing");
@@ -62,7 +90,7 @@ fn get_folder_entries<'a>(entries:&Vec<Rc<Mutex<MenuEntry>>>)->Element<'a, Messa
                 ButtonStatus::File=>{
                     button(
                         row![
-                            svg(Icon::get_handle("song.svg").expect("couldn't find icon")).width(ICON_SIZE),
+                            build_svg(Icon::get_handle("song.svg").expect("couldn't find icon")).width(ICON_SIZE),
                             text(name)
                         ]
                     )
@@ -71,7 +99,7 @@ fn get_folder_entries<'a>(entries:&Vec<Rc<Mutex<MenuEntry>>>)->Element<'a, Messa
                 ButtonStatus::Folder(false,_)=>{
                     button(
                         row![
-                            svg(Icon::get_handle("folder.svg").expect("couldn't find icon")).width(ICON_SIZE),
+                            build_svg(Icon::get_handle("folder.svg").expect("couldn't find icon")).width(ICON_SIZE),
                             text(name)
                         ]
                     )
@@ -81,7 +109,7 @@ fn get_folder_entries<'a>(entries:&Vec<Rc<Mutex<MenuEntry>>>)->Element<'a, Messa
                     column![
                         button(
                             row![
-                                svg(Icon::get_handle("folder.svg").expect("couldn't find icon")).width(ICON_SIZE),
+                                build_svg(Icon::get_handle("folder.svg").expect("couldn't find icon")).width(ICON_SIZE),
                                 text(name)
                             ]
                         )
@@ -102,23 +130,26 @@ fn view(state:&State) -> Element<'_, Message>{
     println!("updating layout");
     column![
         row![
-            scrollable(
-                get_folder_entries(&state.top_folder)
-            ).height(Length::Fill),
-
+            text_input("Music Folder",&state.folder).on_input(Message::UpdateFolder).on_submit(Message::SubmitFolder),
+            button(build_svg(Icon::get_handle("submit.svg").expect("Failed to find submit icon")))
+            .on_press(Message::SubmitFolder).width(84)
         ],
         row![
-            button(svg(Icon::get_handle(if state.player.is_paused() || state.player.empty() {"play.svg"} else {"pause.svg"}).expect("couldn't file play icon")))
-                .on_press(Message::TogglePlay)
-                .height(64),
-            button(svg(Icon::get_handle("skip.svg").expect("counldn't find skip icon")))
+            scrollable(
+                get_folder_entries(&state.top_folder).width(Length::Fill)
+            ).height(Length::Fill),
+        ],
+        row![
+            button(build_svg(Icon::get_handle(if state.player.is_paused() || state.player.empty() {"play.svg"} else {"pause.svg"}).expect("couldn't file play icon")).height(Length::Fill))
+                .on_press_maybe(if state.player.empty() {None} else {Some(Message::TogglePlay)}).height(Length::Fill),
+            button(build_svg(Icon::get_handle("skip.svg").expect("counldn't find skip icon")).height(Length::Fill))
                 .on_press_maybe(
                     match state.player.len(){
                         2.. =>Some(Message::Skip),
                         _=>None
                     }
-                )
-        ],
+                ).height(Length::Fill)
+        ].height(64),
     ].into()
 }
 
@@ -166,6 +197,16 @@ fn update(state:&mut State,msg:Message){
                 *opened=false;
             }
         },
+        Message::UpdateFolder(text)=>{
+            state.folder=text;
+        },
+        Message::SubmitFolder=>{
+            state.top_folder=scan_songs(&state.folder,&mut state.entries);
+            // save chosen folder to file
+            if let Ok(mut file)=File::create(CONFIG_LOCATION){
+                let _=write!(file,"{}",&state.folder);
+            }
+        }
     }
 }
 
