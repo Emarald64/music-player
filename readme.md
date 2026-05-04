@@ -6,6 +6,8 @@ My first Rust GUI project
 
 Currently selected folder is saved to folder.txt so it stays when you restart the program 
 
+Download from https://github.com/Emarald64/music-player/releases
+
 ## Compile and run yourself
 
 1. Install rust from https://rust-lang.org/tools/install/ if you havent already 
